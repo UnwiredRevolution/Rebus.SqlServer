@@ -48,17 +48,19 @@ namespace Rebus.SqlServer.Transport
 
         readonly IAsyncTask _expiredMessagesCleanupTask;
         bool _disposed;
+        bool _forceSynchronousReceive;
 
         /// <summary>
         /// Constructs the transport with the given <see cref="IDbConnectionProvider"/>, using the specified <paramref name="tableName"/> to send/receive messages,
         /// querying for messages with recipient = <paramref name="inputQueueName"/>
         /// </summary>
-        public SqlServerTransport(IDbConnectionProvider connectionProvider, string tableName, string inputQueueName, IRebusLoggerFactory rebusLoggerFactory, IAsyncTaskFactory asyncTaskFactory)
+        public SqlServerTransport(IDbConnectionProvider connectionProvider, string tableName, string inputQueueName, IRebusLoggerFactory rebusLoggerFactory, IAsyncTaskFactory asyncTaskFactory, bool forceSynchronousReceive = false)
         {
             _connectionProvider = connectionProvider;
             _tableName = tableName;
             _inputQueueName = inputQueueName;
             _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _forceSynchronousReceive = forceSynchronousReceive;
 
             ExpiredMessagesCleanupInterval = DefaultExpiredMessagesCleanupInterval;
 
@@ -241,10 +243,25 @@ VALUES
             }
         }
 
+
         /// <summary>
         /// Receives the next message by querying the messages table for a message with a recipient matching this transport's <see cref="Address"/>
         /// </summary>
-        public async Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken)
+        public Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken)
+        {
+            if (_forceSynchronousReceive)
+            {
+                var message = ReceiveAsync(context, cancellationToken).Result;
+
+                return Task.FromResult(message);
+            }
+            return ReceiveAsync(context, cancellationToken);
+        }
+
+        /// <summary>
+        /// Receives the next message by querying the messages table for a message with a recipient matching this transport's <see cref="Address"/>
+        /// </summary>
+        public async Task<TransportMessage> ReceiveAsync(ITransactionContext context, CancellationToken cancellationToken)
         {
             using (await _bottleneck.Enter(cancellationToken))
             {
